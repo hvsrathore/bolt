@@ -163,11 +163,13 @@ src/
 ├── bencode.rs            /* zero-copy BEP-0003 Bencode parser over &[u8] */
 ├── coordinator.rs        /* swarm coordinator, rarest-first scheduling, endgame mode */
 ├── disk.rs               /* memmap2 memory-mapped I/O & rayon SHA-1 piece verification */
+├── engine.rs             /* asynchronous swarm orchestrator, peer management, and pipeline */
 ├── extensions/
 │   ├── mod.rs            /* BEP-0010 extension protocol & extended handshake */
 │   └── metadata.rs       /* BEP-0009 ut_metadata info dictionary resolver */
 ├── lib.rs                /* public module exports and top-level re-exports */
 ├── magnet.rs             /* magnet URI parser (hex & base32 decoding) */
+├── main.rs               /* interactive CLI binary entrypoint and TUI runtime */
 ├── peer/
 │   ├── client_info.rs    /* peer ID client fingerprint decoder (Azureus-style) */
 │   ├── codec.rs          /* zero-copy peer wire message framing (Encoder/Decoder) */
@@ -182,6 +184,28 @@ src/
 └── ui/
     ├── app.rs            /* TUI state model, throughput sparkline buffers, peer items */
     └── mod.rs            /* ratatui dashboard layout, bitfield heatmap, peer table */
+```
+
+---
+
+## Running bolt
+
+Launch the interactive Ratatui terminal dashboard simulation:
+
+```bash
+cargo run -- --demo
+```
+
+Parse and inspect a BEP-0009 Magnet link:
+
+```bash
+cargo run -- "magnet:?xt=urn:btih:c12fe1c06bba254a9d1b00f12abb1f30c1d322ce&dn=ubuntu.iso"
+```
+
+Inspect a `.torrent` file and launch the interactive TUI:
+
+```bash
+cargo run -- --tui path/to/file.torrent
 ```
 
 ---

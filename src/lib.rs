@@ -3,6 +3,7 @@
 pub mod bencode;
 pub mod coordinator;
 pub mod disk;
+pub mod engine;
 pub mod extensions;
 pub mod magnet;
 pub mod peer;
@@ -18,6 +19,7 @@ pub use bencode::{
 };
 pub use coordinator::{BlockKey, PeerCancelDirective, SwarmCoordinator};
 pub use disk::{DiskError, DiskManager, MappedFile};
+pub use engine::{generate_peer_id, SwarmEngine};
 pub use extensions::{
     metadata::{MetadataError, MetadataReassembler, UtMetadataMessage},
     ExtendedHandshake, ExtensionError, EXTENDED_HANDSHAKE_ID, EXTENSION_NAME_UT_METADATA,
