@@ -15,15 +15,19 @@ use ratatui::Frame;
 pub fn render_dashboard(frame: &mut Frame<'_>, app: &AppState) {
     let size = frame.area();
 
+    /* adapt margins and sparkline heights based on available terminal dimensions */
+    let margin = if size.height < 28 || size.width < 100 { 0 } else { 1 };
+    let sparkline_height = if size.height < 26 { 5 } else { 7 };
+
     /* root vertical layout partition */
     let root_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .margin(1)
+        .margin(margin)
         .constraints([
             Constraint::Length(3), /* top header info panel */
             Constraint::Length(3), /* progress gauge */
-            Constraint::Min(10),   /* middle area: heatmap and peer table */
-            Constraint::Length(7), /* bottom sparklines */
+            Constraint::Min(8),    /* middle area: heatmap and peer table */
+            Constraint::Length(sparkline_height), /* bottom sparklines */
         ])
         .split(size);
 
@@ -34,8 +38,8 @@ pub fn render_dashboard(frame: &mut Frame<'_>, app: &AppState) {
     let middle_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(50), /* live bitfield heatmap grid */
-            Constraint::Percentage(50), /* connected peer table */
+            Constraint::Percentage(48), /* live bitfield heatmap grid */
+            Constraint::Percentage(52), /* connected peer table */
         ])
         .split(root_chunks[2]);
 
@@ -71,13 +75,30 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, app: &AppState) {
         )
     };
 
+    let hash_display = if area.width >= 135 {
+        app.info_hash_hex.clone()
+    } else if app.info_hash_hex.len() >= 8 {
+        format!("{}…", &app.info_hash_hex[..8])
+    } else {
+        app.info_hash_hex.clone()
+    };
+
+    let non_name_len = 2 + hash_display.len() + 9 + 8 + 32;
+    let max_name_len = (area.width as usize).saturating_sub(non_name_len).max(12);
+    let name_display = if app.torrent_name.chars().count() > max_name_len {
+        let truncated: String = app.torrent_name.chars().take(max_name_len.saturating_sub(1)).collect();
+        format!("{truncated}…")
+    } else {
+        app.torrent_name.clone()
+    };
+
     let title_line = Line::from(vec![
         Span::styled(
-            format!(" {} ", app.torrent_name),
+            format!(" {name_display} "),
             Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
         ),
         Span::raw(" | Hash: "),
-        Span::styled(&app.info_hash_hex, Style::default().fg(Color::DarkGray)),
+        Span::styled(hash_display, Style::default().fg(Color::DarkGray)),
         Span::raw(" | Mode: "),
         mode_badge,
     ]);
@@ -117,9 +138,17 @@ fn render_progress_bar(frame: &mut Frame<'_>, area: Rect, app: &AppState) {
 
 /* render live 2D Bitfield Heatmap grid with color-coded piece status */
 fn render_bitfield_heatmap(frame: &mut Frame<'_>, area: Rect, app: &AppState) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" Swarm Bitfield Heatmap ");
+    let completed_count = app
+        .piece_states
+        .iter()
+        .filter(|&&s| s == PieceVisualState::Downloaded)
+        .count();
+    let title = format!(
+        " Swarm Bitfield Heatmap [{}/{} pieces] ",
+        completed_count,
+        app.piece_states.len()
+    );
+    let block = Block::default().borders(Borders::ALL).title(title);
 
     /* inner area inside borders */
     let inner_width = area.width.saturating_sub(2) as usize;
@@ -183,16 +212,40 @@ fn render_bitfield_heatmap(frame: &mut Frame<'_>, area: Rect, app: &AppState) {
 
 /* render connected peer table displaying parsed client software and telemetry */
 fn render_peer_table(frame: &mut Frame<'_>, area: Rect, app: &AppState) {
-    let header_cells = [
-        "Peer Address",
-        "Client Software",
-        "Down (KiB/s)",
-        "Up (KiB/s)",
-        "Choked",
-        "Done %",
-    ]
-    .iter()
-    .map(|&h| {
+    let is_compact = area.width < 65;
+
+    let (header_titles, widths): (Vec<&str>, Vec<Constraint>) = if is_compact {
+        (
+            vec!["Peer Address", "Client", "Down", "Done%"],
+            vec![
+                Constraint::Length(16),
+                Constraint::Length(10),
+                Constraint::Length(8),
+                Constraint::Length(7),
+            ],
+        )
+    } else {
+        (
+            vec![
+                "Peer Address",
+                "Client Software",
+                "Down (KiB/s)",
+                "Up (KiB/s)",
+                "Choked",
+                "Done %",
+            ],
+            vec![
+                Constraint::Length(22),
+                Constraint::Length(20),
+                Constraint::Length(12),
+                Constraint::Length(12),
+                Constraint::Length(8),
+                Constraint::Length(8),
+            ],
+        )
+    };
+
+    let header_cells = header_titles.into_iter().map(|h| {
         Cell::from(h).style(
             Style::default()
                 .fg(Color::Yellow)
@@ -208,33 +261,33 @@ fn render_peer_table(frame: &mut Frame<'_>, area: Rect, app: &AppState) {
         .peers
         .iter()
         .map(|peer| {
-            let choke_status = if peer.is_choked { "Yes" } else { "No" };
-            let choke_style = if peer.is_choked {
-                Style::default().fg(Color::Red)
+            let cells = if is_compact {
+                vec![
+                    Cell::from(peer.endpoint.clone()),
+                    Cell::from(peer.client_name.clone()).style(Style::default().fg(Color::Cyan)),
+                    Cell::from(format!("{:.1}", peer.download_speed_kib)),
+                    Cell::from(format!("{:.1}%", peer.progress_pct)),
+                ]
             } else {
-                Style::default().fg(Color::Green)
-            };
+                let choke_status = if peer.is_choked { "Yes" } else { "No" };
+                let choke_style = if peer.is_choked {
+                    Style::default().fg(Color::Red)
+                } else {
+                    Style::default().fg(Color::Green)
+                };
 
-            let cells = vec![
-                Cell::from(peer.endpoint.clone()),
-                Cell::from(peer.client_name.clone()).style(Style::default().fg(Color::Cyan)),
-                Cell::from(format!("{:.1}", peer.download_speed_kib)),
-                Cell::from(format!("{:.1}", peer.upload_speed_kib)),
-                Cell::from(choke_status).style(choke_style),
-                Cell::from(format!("{:.1}%", peer.progress_pct)),
-            ];
+                vec![
+                    Cell::from(peer.endpoint.clone()),
+                    Cell::from(peer.client_name.clone()).style(Style::default().fg(Color::Cyan)),
+                    Cell::from(format!("{:.1}", peer.download_speed_kib)),
+                    Cell::from(format!("{:.1}", peer.upload_speed_kib)),
+                    Cell::from(choke_status).style(choke_style),
+                    Cell::from(format!("{:.1}%", peer.progress_pct)),
+                ]
+            };
             Row::new(cells)
         })
         .collect();
-
-    let widths = [
-        Constraint::Length(18),
-        Constraint::Length(22),
-        Constraint::Length(12),
-        Constraint::Length(12),
-        Constraint::Length(7),
-        Constraint::Length(8),
-    ];
 
     let table = Table::new(rows, widths)
         .header(header)
@@ -344,6 +397,75 @@ mod tests {
         assert!(content.contains("ubuntu-22.04.iso"));
         assert!(content.contains("qBittorrent"));
         assert!(content.contains("Transmission"));
+        assert!(content.contains("Bitfield Heatmap"));
+    }
+
+    #[test]
+    fn test_tui_render_magnet_odyssey() {
+        let backend = TestBackend::new(160, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = AppState::new(
+            "The Odyssey (2026) (1080p AMZN WEB-DL x265 10bit EAC3 5.1 Celdra) [QxR]".to_string(),
+            "f4f90193e557adfdf14ff70d4806213450dd4ea0".to_string(),
+            1744,
+            2097152,
+            3656480137,
+        );
+        app.piece_states[0] = PieceVisualState::InFlight;
+        app.piece_states[1] = PieceVisualState::Rare;
+        app.piece_states[2] = PieceVisualState::Downloaded;
+        app.downloaded_bytes = 2097152;
+        app.record_throughput_sample(127.5, 0.0);
+        let mut peer_id = [0u8; 20];
+        peer_id[..8].copy_from_slice(b"-qB4520-");
+        app.peers.push(PeerDisplayItem::new(
+            "185.220.101.5:51413".to_string(),
+            &peer_id,
+            127.5,
+            0.0,
+            false,
+            true,
+            0.1,
+        ));
+        terminal.draw(|f| render_dashboard(f, &app)).unwrap();
+        let content = format!("{:?}", terminal.backend().buffer());
+        assert!(content.contains("The Odyssey"));
+        assert!(content.contains("Transfer Progress"));
+        assert!(content.contains("qBittorren"));
+        assert!(content.contains("Bitfield Heatmap"));
+    }
+
+    #[test]
+    fn test_tui_render_magnet_odyssey_80x24() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = AppState::new(
+            "The Odyssey (2026) (1080p AMZN WEB-DL x265 10bit EAC3 5.1 Celdra) [QxR]".to_string(),
+            "f4f90193e557adfdf14ff70d4806213450dd4ea0".to_string(),
+            1744,
+            2097152,
+            3656480137,
+        );
+        app.piece_states[0] = PieceVisualState::InFlight;
+        app.piece_states[1] = PieceVisualState::Downloaded;
+        app.downloaded_bytes = 2097152;
+        app.record_throughput_sample(127.5, 0.0);
+        let mut peer_id = [0u8; 20];
+        peer_id[..8].copy_from_slice(b"-qB4520-");
+        app.peers.push(PeerDisplayItem::new(
+            "185.220.101.5:51413".to_string(),
+            &peer_id,
+            127.5,
+            0.0,
+            false,
+            true,
+            0.1,
+        ));
+        terminal.draw(|f| render_dashboard(f, &app)).unwrap();
+        let content = format!("{:?}", terminal.backend().buffer());
+        assert!(content.contains("The Odyssey"));
+        assert!(content.contains("Transfer Progress"));
+        assert!(content.contains("qBittorren"));
         assert!(content.contains("Bitfield Heatmap"));
     }
 }
